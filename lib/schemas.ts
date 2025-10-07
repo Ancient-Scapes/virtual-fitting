@@ -1,9 +1,7 @@
 import { z } from "zod";
 
 const finiteNumber = (message: string) =>
-  z
-    .number({ invalid_type_error: message })
-    .refine((value) => Number.isFinite(value), message);
+  z.number().refine((value) => Number.isFinite(value), message);
 
 export const bodySpecSchema = z.object({
   height: finiteNumber("身長は数値で入力してください")
@@ -25,11 +23,11 @@ export const clothSpecSchema = z.object({
 
 export const tryOnRequestSchema = z.object({
   userImageB64: z
-    .string({ invalid_type_error: "自画像を選択してください" })
-    .regex(/^data:image\/(png|jpeg|jpg);base64,/i, "画像データURLが無効です"),
+    .string()
+    .regex(/^data:image\/(png|jpeg|jpg);base64,/i, "自画像を選択してください"),
   clothImageB64: z
-    .string({ invalid_type_error: "服画像を選択してください" })
-    .regex(/^data:image\/(png|jpeg|jpg);base64,/i, "画像データURLが無効です"),
+    .string()
+    .regex(/^data:image\/(png|jpeg|jpg);base64,/i, "服画像を選択してください"),
   body: bodySpecSchema,
   cloth: clothSpecSchema,
 });

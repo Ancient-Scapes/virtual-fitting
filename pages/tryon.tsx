@@ -255,18 +255,21 @@ export default function TryOnPage() {
     const validationErrors: string[] = [];
     const bodyResult = bodySpecSchema.safeParse(body);
     if (!bodyResult.success) {
-      bodyResult.error.errors.forEach((issue) => validationErrors.push(issue.message));
+      bodyResult.error.issues.forEach((issue) => validationErrors.push(issue.message));
     }
 
     const clothResult = clothSpecSchema.safeParse(cloth);
     if (!clothResult.success) {
-      clothResult.error.errors.forEach((issue) => validationErrors.push(issue.message));
+      clothResult.error.issues.forEach((issue) => validationErrors.push(issue.message));
     }
 
-    if (validationErrors.length > 0) {
+    if (validationErrors.length > 0 || !bodyResult.success || !clothResult.success) {
       setFormErrors(validationErrors);
       return;
     }
+
+    const bodyData = bodyResult.data;
+    const clothData = clothResult.data;
 
     setSubmitting(true);
 
@@ -280,8 +283,8 @@ export default function TryOnPage() {
         body: JSON.stringify({
           userImageB64: userImage.base64,
           clothImageB64: clothImage.base64,
-          body: bodyResult.data,
-          cloth: clothResult.data,
+          body: bodyData,
+          cloth: clothData,
         }),
       });
 
@@ -307,18 +310,18 @@ export default function TryOnPage() {
         return;
       }
 
-      const feedback = evaluateFit(bodyResult.data, clothResult.data);
+      const feedback = evaluateFit(bodyData, clothData);
       const storedResult: StoredResult = {
         imageBase64,
         feedback,
-        body: bodyResult.data,
-        cloth: clothResult.data,
+        body: bodyData,
+        cloth: clothData,
         generatedAt: new Date().toISOString(),
       };
 
       await Promise.all([
         saveLastResult(storedResult),
-        saveBodySpec(bodyResult.data),
+        saveBodySpec(bodyData),
         saveUserImage(userImage.base64),
       ]);
 

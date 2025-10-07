@@ -18,16 +18,20 @@ const SupabaseContext = createContext<{
   loading: boolean;
 } | null>(null);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseConfig = (() => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!url || !anonKey) {
-  throw new Error("Supabaseの環境変数が設定されていません");
-}
+  if (!url || !anonKey) {
+    throw new Error("Supabaseの環境変数が設定されていません");
+  }
+
+  return { url, anonKey } as const;
+})();
 
 export function SupabaseProvider({ children }: PropsWithChildren) {
   const supabase = useMemo(() => {
-    return createClient(url, anonKey, {
+    return createClient(supabaseConfig.url, supabaseConfig.anonKey, {
       auth: {
         persistSession: true,
         storageKey: "virtual-fitting-auth",
