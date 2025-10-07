@@ -1,40 +1,87 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/pages/api-reference/create-next-app).
+# Virtual Fit
 
-## Getting Started
+Google アカウントでログインし、全身写真と服の画像・採寸情報を入力すると Gemini 2.5 Flash Image による試着プレビューを生成する PoC です。生成結果に対しては肩幅と着丈のフィット感からスコアを算出し、★評価とコメントをフィードバックします。
 
-First, run the development server:
+## セットアップ
+
+1. 依存関係をインストールします。
+
+   ```bash
+   npm install
+   ```
+
+2. 必要な環境変数を `.env.local` などに設定します。
+
+   ```ini
+   GOOGLE_API_KEY=your_google_generative_ai_key
+   NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+   ```
+
+   - `GOOGLE_API_KEY`: Gemini 2.5 Flash Image 用 API キー（サーバ側のみで利用します）。
+   - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase プロジェクトの URL と anon キー。Google OAuth を Supabase Auth で有効化してください。
+
+3. Supabase Auth で Google プロバイダーを有効化したうえで、Redirect URL に `http://localhost:3000/` を許可してください。
+
+## 開発サーバーの起動
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`http://localhost:3000` にアクセスすると `/login` へリダイレクトされます。
 
-You can start editing the page by modifying `pages/index.tsx`. The page auto-updates as you edit the file.
+## 主要フロー
 
-[API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.ts`.
+- **/login**: Google でログインすると Supabase Auth のセッションが確立され、/tryon へ遷移します。
+- **/tryon**:
+  - 全身写真と服画像をアップロード（送信前に長辺 1024px にリサイズ）。
+  - 体型（身長 / 肩幅）と服スペック（肩幅 / 着丈）を入力。
+  - `localforage`（IndexedDB）に自画像と体型・直近の生成結果を保存し、リロード後も復元します。
+  - 生成ボタンは 1 回押下で 1 枚のみ生成。直後は 12 秒間のクールダウンがかかり、429 を返します。
+- **/result**:
+  - 生成された試着プレビュー画像を表示し、5 段階評価（★）とコメント、スコア内訳を表示。
+  - 体型と服スペックの比較テーブルで差分を確認できます。
+  - 画像はサーバに保存せず、端末側でダウンロードできます。
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) instead of React pages.
+## API プロキシ
 
-This project uses [`next/font`](https://nextjs.org/docs/pages/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`POST /api/tryon`
 
-## Learn More
+```json
+{
+  "userImageB64": "data:image/png;base64,...",
+  "clothImageB64": "data:image/png;base64,...",
+  "body": {
+    "height": 175,
+    "shoulder": 45
+  },
+  "cloth": {
+    "shoulder": 48,
+    "length": 70
+  }
+}
+```
 
-To learn more about Next.js, take a look at the following resources:
+- Supabase Auth のアクセストークンを `Authorization: Bearer <token>` で付与してください。
+- 成功時は `{ "imageBase64": "data:image/png;base64,..." }` を返します。
+- バリデーションエラー時は 400、クールダウン中は 429、Gemini 失敗時は 500 を返します。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn-pages-router) - an interactive Next.js tutorial.
+## フィット感スコア
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+肩幅と着丈で 0–100 点を算出し、それぞれ 50 点満点の合算スコアを ★1–★5 に割り当てます。
+コメントは以下のようなルールで生成されます。
 
-## Deploy on Vercel
+- 肩幅差が -1cm 未満 → 「肩幅が小さくタイト傾向」
+- 肩幅差が +4cm 超 → 「肩が落ちる可能性」
+- 理想着丈（身長 × 0.25）の ±10% 超 → 「着丈が長め/短め」
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 動作キャプチャ
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
+PR 作成時は `docs/` 配下に録画（GIF もしくは動画）を追加し、この README にリンクを追記してください。例：`docs/tryon-demo.gif`。
+
+## 注意事項
+
+- Google API には無料枠配慮のためのクールダウンが入っています。短時間での連打は避けてください。
+- 生成画像はサーバには保存していません。必要に応じて `/result` ページからダウンロードしてください。
+- Supabase の service_role キーは使用せず、Anon キーで構成しています。
