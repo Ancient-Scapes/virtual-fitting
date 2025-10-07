@@ -41,15 +41,15 @@ export default function ResultPage() {
     };
   }, []);
 
-  const breakdown = storedResult?.feedback.breakdown;
+  const feedback = storedResult?.feedback;
+  const breakdown = feedback?.breakdown;
 
   const comparisonRows = useMemo(() => {
-    if (!storedResult) return [];
-    const shoulderDiff = storedResult.feedback.breakdown.shoulderDiff;
+    if (!storedResult?.body || !storedResult?.cloth || !breakdown) return [];
+    const shoulderDiff = breakdown.shoulderDiff;
     const lengthDiffRatio =
-      (storedResult.cloth.length -
-        storedResult.feedback.breakdown.lengthTarget) /
-      storedResult.feedback.breakdown.lengthTarget;
+      (storedResult.cloth.length - breakdown.lengthTarget) /
+      breakdown.lengthTarget;
     return [
       {
         label: "肩幅",
@@ -59,12 +59,12 @@ export default function ResultPage() {
       },
       {
         label: "着丈",
-        body: `${storedResult.body.height} cm × 0.25 = ${storedResult.feedback.breakdown.lengthTarget.toFixed(1)} cm`,
+        body: `${storedResult.body.height} cm × 0.25 = ${breakdown.lengthTarget.toFixed(1)} cm`,
         cloth: `${storedResult.cloth.length} cm`,
         note: `${lengthDiffRatio >= 0 ? "+" : ""}${(lengthDiffRatio * 100).toFixed(1)} %`,
       },
     ];
-  }, [storedResult]);
+  }, [storedResult, breakdown]);
 
   if (loading || !hydrated) {
     return (
@@ -151,8 +151,16 @@ export default function ResultPage() {
               </p>
             </div>
             <div className="result-summary">
-              <p className="stars">{renderStars(storedResult.feedback.stars)}</p>
-              <p className="comment">{storedResult.feedback.comment}</p>
+              {feedback ? (
+                <>
+                  <p className="stars">{renderStars(feedback.stars)}</p>
+                  <p className="comment">{feedback.comment}</p>
+                </>
+              ) : (
+                <p className="section-note">
+                  サイズ評価は服のサイズを入力すると表示されます。
+                </p>
+              )}
 
               {breakdown && (
                 <ul className="score-list">
@@ -165,29 +173,31 @@ export default function ResultPage() {
           </div>
         </section>
 
-        <section className="panel">
-          <h2>体型 vs 服スペック</h2>
-          <table className="comparison-table">
-            <thead>
-              <tr>
-                <th>項目</th>
-                <th>体型</th>
-                <th>服</th>
-                <th>差分</th>
-              </tr>
-            </thead>
-            <tbody>
-              {comparisonRows.map((row) => (
-                <tr key={row.label}>
-                  <td>{row.label}</td>
-                  <td>{row.body}</td>
-                  <td>{row.cloth}</td>
-                  <td>{row.note}</td>
+        {comparisonRows.length > 0 && (
+          <section className="panel">
+            <h2>体型 vs 服スペック</h2>
+            <table className="comparison-table">
+              <thead>
+                <tr>
+                  <th>項目</th>
+                  <th>体型</th>
+                  <th>服</th>
+                  <th>差分</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+              </thead>
+              <tbody>
+                {comparisonRows.map((row) => (
+                  <tr key={row.label}>
+                    <td>{row.label}</td>
+                    <td>{row.body}</td>
+                    <td>{row.cloth}</td>
+                    <td>{row.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        )}
       </div>
     </>
   );

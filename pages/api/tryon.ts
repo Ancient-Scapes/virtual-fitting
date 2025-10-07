@@ -179,8 +179,12 @@ export default async function handler(
     cloth,
   } = parseResult.data;
 
-  const bodySummary = `height ${body.height}, shoulder ${body.shoulder}`;
-  const clothSummary = `shoulder ${cloth.shoulder}, length ${cloth.length}`;
+  const bodySummary = body
+    ? `height ${body.height}, shoulder ${body.shoulder}`
+    : "measurements not provided";
+  const clothSummary = cloth
+    ? `shoulder ${cloth.shoulder}, length ${cloth.length}`
+    : "measurements not provided";
 
   try {
     const imageBase64 = await callGeminiApi(

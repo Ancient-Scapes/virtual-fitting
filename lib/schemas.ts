@@ -28,8 +28,8 @@ export const tryOnRequestSchema = z.object({
   clothImageB64: z
     .string()
     .regex(/^data:image\/(png|jpeg|jpg);base64,/i, "服画像を選択してください"),
-  body: bodySpecSchema,
-  cloth: clothSpecSchema,
+  body: bodySpecSchema.optional(),
+  cloth: clothSpecSchema.optional(),
 });
 
 export type BodySpecInput = z.infer<typeof bodySpecSchema>;

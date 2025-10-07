@@ -11,8 +11,8 @@ export type ClothSpec = {
 export type TryOnRequestPayload = {
   userImageB64: string;
   clothImageB64: string;
-  body: BodySpec;
-  cloth: ClothSpec;
+  body?: BodySpec;
+  cloth?: ClothSpec;
 };
 
 export type RatingBreakdown = {
@@ -32,8 +32,8 @@ export type TryOnFeedback = {
 
 export type StoredResult = {
   imageBase64: string;
-  feedback: TryOnFeedback;
-  body: BodySpec;
-  cloth: ClothSpec;
+  body?: BodySpec;
+  cloth?: ClothSpec;
+  feedback?: TryOnFeedback;
   generatedAt: string;
 };

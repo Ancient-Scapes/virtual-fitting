@@ -24,7 +24,12 @@ import {
   saveLastResult,
   saveUserImage,
 } from "@/lib/storage";
-import type { BodySpec, ClothSpec, StoredResult } from "@/lib/types";
+import type {
+  BodySpec,
+  ClothSpec,
+  StoredResult,
+  TryOnRequestPayload,
+} from "@/lib/types";
 
 const COOLDOWN_SECONDS = 12;
 
@@ -84,15 +89,26 @@ export default function TryOnPage() {
   const [clothForm, setClothForm] = useState<ClothFormState>(emptyCloth);
   const [userImage, setUserImage] = useState<ImageState | null>(null);
   const [clothImage, setClothImage] = useState<ImageState | null>(null);
+  const [specsExpanded, setSpecsExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [apiError, setApiError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(false);
   const [cooldownRemaining, setCooldownRemaining] = useState<number>(0);
   const cooldownUntilRef = useRef<number>(0);
   const [hydrated, setHydrated] = useState(false);
   const [hasStoredResult, setHasStoredResult] = useState(false);
 
   const isAuthenticated = useMemo(() => !!session, [session]);
+
+  const specFieldValues = [
+    bodyForm.height,
+    bodyForm.shoulder,
+    clothForm.shoulder,
+    clothForm.length,
+  ];
+  const specsFilled = specFieldValues.every((value) => value.trim() !== "");
+  const specsTouched = specFieldValues.some((value) => value.trim() !== "");
   const userEmail = session?.user?.email ?? undefined;
 
   useEffect(() => {
@@ -117,6 +133,7 @@ export default function TryOnPage() {
           height: String(storedBody.height ?? ""),
           shoulder: String(storedBody.shoulder ?? ""),
         });
+        setSpecsExpanded(true);
       }
 
       if (storedImage) {
@@ -125,6 +142,18 @@ export default function TryOnPage() {
           preview: storedImage,
           width: 0,
           height: 0,
+        });
+      }
+
+      if (storedResult?.body && storedResult.cloth) {
+        setSpecsExpanded(true);
+        setBodyForm({
+          height: String(storedResult.body.height ?? ""),
+          shoulder: String(storedResult.body.shoulder ?? ""),
+        });
+        setClothForm({
+          shoulder: String(storedResult.cloth.shoulder ?? ""),
+          length: String(storedResult.cloth.length ?? ""),
         });
       }
 
@@ -158,11 +187,15 @@ export default function TryOnPage() {
 
   useEffect(() => {
     if (!hydrated) return;
-    const parsed = parseBody(bodyForm);
-    if (Object.values(parsed).every((value) => Number.isFinite(value) && value > 0)) {
-      void saveBodySpec(parsed);
+    if (specsFilled) {
+      const parsed = parseBody(bodyForm);
+      if (Object.values(parsed).every((value) => Number.isFinite(value) && value > 0)) {
+        void saveBodySpec(parsed);
+      }
+    } else if (!specsTouched) {
+      void saveBodySpec(null);
     }
-  }, [bodyForm, hydrated]);
+  }, [bodyForm, hydrated, specsFilled, specsTouched]);
 
   const handleImageChange = async (
     event: ChangeEvent<HTMLInputElement>,
@@ -249,43 +282,52 @@ export default function TryOnPage() {
       return;
     }
 
-    const body = parseBody(bodyForm);
-    const cloth = parseCloth(clothForm);
-
     const validationErrors: string[] = [];
-    const bodyResult = bodySpecSchema.safeParse(body);
-    if (!bodyResult.success) {
-      bodyResult.error.issues.forEach((issue) => validationErrors.push(issue.message));
+    let bodyData: BodySpec | undefined;
+    let clothData: ClothSpec | undefined;
+
+    if (specsExpanded && specsFilled) {
+      const body = parseBody(bodyForm);
+      const cloth = parseCloth(clothForm);
+
+      const bodyResult = bodySpecSchema.safeParse(body);
+      if (!bodyResult.success) {
+        bodyResult.error.issues.forEach((issue) => validationErrors.push(issue.message));
+      } else {
+        bodyData = bodyResult.data;
+      }
+
+      const clothResult = clothSpecSchema.safeParse(cloth);
+      if (!clothResult.success) {
+        clothResult.error.issues.forEach((issue) => validationErrors.push(issue.message));
+      } else {
+        clothData = clothResult.data;
+      }
     }
 
-    const clothResult = clothSpecSchema.safeParse(cloth);
-    if (!clothResult.success) {
-      clothResult.error.issues.forEach((issue) => validationErrors.push(issue.message));
-    }
-
-    if (validationErrors.length > 0 || !bodyResult.success || !clothResult.success) {
+    if (validationErrors.length > 0) {
       setFormErrors(validationErrors);
       return;
     }
 
-    const bodyData = bodyResult.data;
-    const clothData = clothResult.data;
-
     setSubmitting(true);
+      setShowOverlay(true);
 
     try {
+      const payload: TryOnRequestPayload = {
+        userImageB64: userImage.base64,
+        clothImageB64: clothImage.base64,
+        ...(bodyData ? { body: bodyData } : {}),
+        ...(clothData ? { cloth: clothData } : {}),
+      };
+
       const response = await fetch("/api/tryon", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({
-          userImageB64: userImage.base64,
-          clothImageB64: clothImage.base64,
-          body: bodyData,
-          cloth: clothData,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const json = await response.json().catch(() => null);
@@ -301,28 +343,32 @@ export default function TryOnPage() {
         } else {
           setApiError(json?.error ?? "生成に失敗しました");
         }
+        setSubmitting(false);
+        setShowOverlay(false);
         return;
       }
 
       const { imageBase64 } = json as { imageBase64?: string };
       if (!imageBase64) {
         setApiError("生成結果が取得できませんでした");
+        setSubmitting(false);
+        setShowOverlay(false);
         return;
       }
 
-      const feedback = evaluateFit(bodyData, clothData);
+      const feedback = bodyData && clothData ? evaluateFit(bodyData, clothData) : undefined;
       const storedResult: StoredResult = {
         imageBase64,
-        feedback,
-        body: bodyData,
-        cloth: clothData,
         generatedAt: new Date().toISOString(),
+        ...(bodyData ? { body: bodyData } : {}),
+        ...(clothData ? { cloth: clothData } : {}),
+        ...(feedback ? { feedback } : {}),
       };
 
       await Promise.all([
         saveLastResult(storedResult),
-        saveBodySpec(bodyData),
         saveUserImage(userImage.base64),
+        saveBodySpec(bodyData ?? null),
       ]);
 
       setHasStoredResult(true);
@@ -335,6 +381,7 @@ export default function TryOnPage() {
       setApiError("生成リクエストに失敗しました");
     } finally {
       setSubmitting(false);
+      setShowOverlay(false);
     }
   };
 
@@ -352,6 +399,16 @@ export default function TryOnPage() {
         <title>Virtual Fit | Try</title>
       </Head>
       <div className="page">
+        {showOverlay && (
+          <div className="loading-overlay">
+            <div className="loading-contents">
+              <div className="loading-bar">
+                <div className="loading-fill" />
+              </div>
+              <p>[ now fitting... ]</p>
+            </div>
+          </div>
+        )}
         <header className="page-header">
           <div>
             <h1>Virtual Fit</h1>
@@ -432,63 +489,92 @@ export default function TryOnPage() {
             </div>
           </section>
 
-          <div className="section-lineup">
-            <section className="section">
-              <h2>2. あなたの体型（cm）</h2>
-              <div className="form-grid">
-                <label>
-                  <span>身長</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={bodyForm.height}
-                    className="input-3-digit"
-                    onChange={handleBodyInput("height")}
-                  />
-                </label>
-                <label>
-                  <span>肩幅</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={bodyForm.shoulder}
-                    className="input-2-digit"
-                    onChange={handleBodyInput("shoulder")}
-                  />
-                </label>
+          <section className="section">
+            <div className="collapse-header">
+              <div>
+                <h2>2. スペック入力（任意）</h2>
+                <p className="section-note">
+                  スペックからあなたがぴったりかどうかAIが評価することもできます。
+                </p>
               </div>
-            </section>
-
-            <section className="section">
-              <h2>3. 服のサイズ（cm）</h2>
-              <div className="form-grid">
-                <label>
-                  <span>肩幅</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={clothForm.shoulder}
-                    className="input-2-digit"
-                    onChange={handleClothInput("shoulder")}
-                  />
-                </label>
-                <label>
-                  <span>着丈</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={clothForm.length}
-                    className="input-3-digit"
-                    onChange={handleClothInput("length")}
-                  />
-                </label>
+              <button
+                type="button"
+                className="collapse-toggle"
+                onClick={() => setSpecsExpanded((prev) => !prev)}
+              >
+                <span>{specsExpanded ? "閉じる" : "入力する"}</span>
+                <span className="material-icons">
+                  {specsExpanded ? "expand_less" : "expand_more"}
+                </span>
+              </button>
+            </div>
+            {specsExpanded && (
+              <div className="spec-panel">
+                <p className="section-note">全ての項目を入力すると★評価が表示されます。</p>
+                <div className="section-lineup">
+                  <div className="sub-section">
+                    <h3>あなたの体型（cm）</h3>
+                    <div className="form-grid">
+                      <label>
+                        <span>身長</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={bodyForm.height}
+                          className="input-3-digit"
+                          onChange={handleBodyInput("height")}
+                        />
+                      </label>
+                      <label>
+                        <span>肩幅</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={bodyForm.shoulder}
+                          className="input-2-digit"
+                          onChange={handleBodyInput("shoulder")}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  <div className="sub-section">
+                    <h3>服のサイズ（cm）</h3>
+                    <div className="form-grid">
+                      <label>
+                        <span>肩幅</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={clothForm.shoulder}
+                          className="input-2-digit"
+                          onChange={handleClothInput("shoulder")}
+                        />
+                      </label>
+                      <label>
+                        <span>着丈</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={clothForm.length}
+                          className="input-3-digit"
+                          onChange={handleClothInput("length")}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                {!specsFilled && specsTouched && (
+                  <p className="section-note warning">
+                    全項目を入力すると評価が表示されます。
+                  </p>
+                )}
               </div>
-            </section>
-          </div>
+            )}
+          </section>
 
           {formErrors.length > 0 && (
             <div className="error-box">
